@@ -1,0 +1,103 @@
+
+services:
+  # 1. PostgreSQL
+  postgres:
+    image: postgres:16-alpine
+    container_name: n8n_ai_postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - n8n_network
+
+  # 2. Qdrant
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: n8n_ai_qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333" # Web UI: http://localhost:6333/dashboard
+    environment:
+      - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY}
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - n8n_network
+
+  # 3. LiteLLM (Универсальный OpenAI-совместимый шлюз)
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: n8n_ai_litellm
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      # Пробрасываем переменные из .env в контейнер LiteLLM
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+      - PROVIDER_API_KEY=${PROVIDER_API_KEY}
+      - DEFAULT_MODEL=${DEFAULT_MODEL}
+      - PORT=4000
+    volumes:
+      # Монтируем конфиг в точку, которую ожидает LiteLLM
+      - ./litellm_config.yaml:/app/config.yaml
+    command: --config /app/config.yaml --port 4000
+    networks:
+      - n8n_network
+    depends_on:
+      - postgres # Просто для порядка запуска, прямой зависимости нет
+
+  # 4. n8n
+  n8n:
+    image: n8nio/n8n:latest
+    hostname: n8n
+    container_name: n8n_ai_app
+    restart: unless-stopped
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
+      - DB_POSTGRESDB_USER=${POSTGRES_USER}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_HOST=${N8N_HOST:-localhost}
+      - N8N_PORT=${N8N_PORT:-5678}
+      - N8N_PROTOCOL=${N8N_PROTOCOL:-http}
+      - WEBHOOK_URL=${WEBHOOK_URL:-http://localhost:5678/}
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE:-Europe/Moscow}
+      - TZ=${TZ:-Europe/Moscow}
+      - N8N_LOG_LEVEL=${N8N_LOG_LEVEL:-info}
+      - N8N_DIAGNOSTICS_ENABLED=${N8N_DIAGNOSTICS_ENABLED:-false}
+    env_file:
+      - path: .env
+        required: true
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./shared:/data/shared
+    depends_on:
+      postgres:
+        condition: service_healthy
+      litellm:
+        condition: service_started
+    networks:
+      - n8n_network
+
+volumes:
+  postgres_data:
+  qdrant_data:
+  n8n_data:
+
+networks:
+  n8n_network:
+    driver: bridge

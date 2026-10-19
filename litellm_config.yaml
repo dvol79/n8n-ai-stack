@@ -1,0 +1,11 @@
+model_list:
+  - model_name: "universal-ai"
+    litellm_params:
+      model: os.environ/DEFAULT_MODEL
+      api_key: os.environ/PROVIDER_API_KEY
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  # Отключаем предупреждение о прокси и упрощаем аутентификацию для локального использования
+  proxy_batch_write: false
+  store_model_in_db: false
